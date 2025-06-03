@@ -92,8 +92,10 @@ class SpeechRecognitionManager {
           })
           .catch((error) => {
             console.error('Microphone access denied:', error);
+            console.error('Error name:', error.name);
+            console.error('Error message:', error.message);
             if (this.onErrorCallback) {
-              this.onErrorCallback('マイクアクセスが拒否されました。ブラウザの設定を確認してください。');
+              this.onErrorCallback(`マイクアクセスが拒否されました: ${error.name} - ${error.message}`);
             }
           });
       } else {
