@@ -83,7 +83,22 @@ class SpeechRecognitionManager {
     }
 
     try {
-      this.recognition.start();
+      // Request microphone permission first
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+          .then(() => {
+            console.log('Microphone access granted');
+            this.recognition.start();
+          })
+          .catch((error) => {
+            console.error('Microphone access denied:', error);
+            if (this.onErrorCallback) {
+              this.onErrorCallback('マイクアクセスが拒否されました。ブラウザの設定を確認してください。');
+            }
+          });
+      } else {
+        this.recognition.start();
+      }
     } catch (error) {
       console.error('Failed to start speech recognition:', error);
       throw error;

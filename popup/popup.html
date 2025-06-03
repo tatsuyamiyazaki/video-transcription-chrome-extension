@@ -29,6 +29,32 @@
       margin: 4px 0 0 0;
     }
     
+    .info-box {
+      background: #e8f5e8;
+      border: 1px solid #ceead6;
+      border-radius: 4px;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    
+    .info-box p {
+      margin: 0 0 8px 0;
+      font-weight: 600;
+      color: #137333;
+    }
+    
+    .info-box ol {
+      margin: 0;
+      padding-left: 20px;
+      color: #137333;
+    }
+    
+    .info-box li {
+      margin-bottom: 4px;
+    }
+    
     .controls {
       display: flex;
       flex-direction: column;
@@ -149,6 +175,16 @@
   <div class="header">
     <h1 class="title">Video Transcription</h1>
     <p class="subtitle">Web Speech API POC</p>
+  </div>
+  
+  <div class="info-box">
+    <p><strong>使用方法:</strong></p>
+    <ol>
+      <li>動画を再生してください</li>
+      <li>スピーカーで音声を再生してください（ヘッドフォン不可）</li>
+      <li>マイクへのアクセスを許可してください</li>
+      <li>「開始」ボタンを押してください</li>
+    </ol>
   </div>
   
   <div class="controls">

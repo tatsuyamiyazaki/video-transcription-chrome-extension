@@ -100,38 +100,30 @@ class TranscriptionPopup {
 
   async startTranscription() {
     try {
-      this.updateStatus('starting', '音声認識を開始しています...');
+      this.updateStatus('starting', 'マイクアクセスを要求しています...');
       
-      // Get current active tab
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
-      // Send message to background script to start audio capture
-      const response = await chrome.runtime.sendMessage({
-        type: 'START_TRANSCRIPTION',
-        tabId: tab.id,
-        language: this.languageSelect.value
+      // Start speech recognition directly (will use system microphone)
+      this.speechRecognition.start({
+        language: this.languageSelect.value,
+        continuous: true,
+        interimResults: true
       });
-
-      if (response.success) {
-        // Start speech recognition in popup
-        this.speechRecognition.start({
-          language: this.languageSelect.value,
-          continuous: true,
-          interimResults: true
-        });
-        
-        this.isRecording = true;
-        this.updateButtons();
-        this.updateStatus('recording', '音声認識中...');
-        
-        // Show recording indicator on the page
+      
+      this.isRecording = true;
+      this.updateButtons();
+      this.updateStatus('recording', '音声認識中... (スピーカーの音声を認識中)');
+      
+      // Show recording indicator on the page
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         chrome.tabs.sendMessage(tab.id, {
           type: 'HIGHLIGHT_RECORDING',
           show: true
         });
-      } else {
-        throw new Error(response.error || 'Failed to start transcription');
+      } catch (error) {
+        console.log('Could not show recording indicator:', error.message);
       }
+      
     } catch (error) {
       console.error('Failed to start transcription:', error);
       this.updateStatus('error', `エラー: ${error.message}`);
@@ -145,25 +137,21 @@ class TranscriptionPopup {
       // Stop speech recognition
       this.speechRecognition.stop();
       
-      // Send message to background script to stop audio capture
-      const response = await chrome.runtime.sendMessage({
-        type: 'STOP_TRANSCRIPTION'
-      });
-
-      if (response.success) {
-        this.isRecording = false;
-        this.updateButtons();
-        this.updateStatus('stopped', '音声認識が停止されました');
-        
-        // Hide recording indicator on the page
+      this.isRecording = false;
+      this.updateButtons();
+      this.updateStatus('stopped', '音声認識が停止されました');
+      
+      // Hide recording indicator on the page
+      try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         chrome.tabs.sendMessage(tab.id, {
           type: 'HIGHLIGHT_RECORDING',
           show: false
         });
-      } else {
-        throw new Error(response.error || 'Failed to stop transcription');
+      } catch (error) {
+        console.log('Could not hide recording indicator:', error.message);
       }
+      
     } catch (error) {
       console.error('Failed to stop transcription:', error);
       this.updateStatus('error', `エラー: ${error.message}`);
