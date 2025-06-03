@@ -77,7 +77,11 @@ Chromeブラウザのアクティブタブで再生される動画コンテン�
    - 高精度、多言語対応
    - 有料サービス
 
-2. **OpenAI Whisper API**
+2. **Web Speech API**
+   - Chrome標準、無料
+   - 中程度の精度
+
+3. **OpenAI Whisper API**
    - 高精度、優秀な多言語対応
    - 有料サービス
 

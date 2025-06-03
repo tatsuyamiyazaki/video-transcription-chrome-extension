@@ -1418,6 +1418,7 @@ if (require.main === module) {
 
 ### Phase 2: 文字起こし機能
 - [ ] Google STT API 連携
+- [ ] Web Speech API 連携
 - [ ] Whisper API 連携
 - [ ] エンジン切り替え機能
 - [ ] リアルタイム処理実装

@@ -31,10 +31,10 @@ graph TB
             AM[Auth Manager]
         end
     end
-    
-    subgraph "External APIs"
-        GSTT[Google Speech-to-Text]
-        WHISPER[OpenAI Whisper]
+      subgraph "External APIs"
+        GSTT[Google Speech-to-Text<br/>高精度・多言語・有料]
+        WSA[Web Speech API<br/>Chrome標準・無料・中程度精度]
+        WHISPER[OpenAI Whisper<br/>高精度・多言語・有料]
         GDRIVE[Google Drive API]
         OAUTH[Google OAuth 2.0]
     end
@@ -50,10 +50,10 @@ graph TB
     BG --> CS
     CS --> TAB
     TAB --> AUDIO
-    
-    BG --> AR
+      BG --> AR
     AR --> TR
     TR --> GSTT
+    TR --> WSA
     TR --> WHISPER
     BG --> FM
     FM --> GDRIVE
@@ -269,11 +269,16 @@ classDiagram
         +detectLanguage(audioData: AudioData)
         +processResult(result: TranscriptionResult)
     }
-    
-    class GoogleSTTAdapter {
+      class GoogleSTTAdapter {
         +transcribe(audioData: AudioData)
         +authenticate()
         +handleResponse(response: APIResponse)
+    }
+    
+    class WebSpeechAdapter {
+        +transcribe(audioData: AudioData)
+        +initializeRecognition()
+        +handleResponse(response: SpeechRecognitionResult)
     }
     
     class WhisperAdapter {
@@ -291,6 +296,7 @@ classDiagram
     }
     
     TranscriptionEngine --> GoogleSTTAdapter
+    TranscriptionEngine --> WebSpeechAdapter
     TranscriptionEngine --> WhisperAdapter
     TranscriptionEngine --> TranscriptionResult
 ```
@@ -361,6 +367,16 @@ classDiagram
 
 ## 📡 API インテグレーション設計
 
+### 文字起こしエンジン選択戦略
+
+各エンジンの特徴と選択基準：
+
+| エンジン | 精度 | コスト | 接続性 | 多言語対応 | 推奨用途 |
+|---------|------|--------|--------|------------|----------|
+| Google Speech-to-Text | 高 | 有料 | API | 優秀 | 高品質が必要な場合 |
+| Web Speech API | 中 | 無料 | ブラウザ標準 | 良好 | 基本的な文字起こし |
+| OpenAI Whisper | 高 | 有料 | API | 優秀 | 多言語・高精度が必要 |
+
 ### 1. Google Speech-to-Text API
 
 ```mermaid
@@ -380,7 +396,41 @@ sequenceDiagram
     TE-->>AR: transcriptionComplete
 ```
 
-### 2. OpenAI Whisper API
+### 2. Web Speech API
+
+Web Speech APIはChrome標準のブラウザAPIで、追加のAPIキーや認証が不要です。
+
+```mermaid
+sequenceDiagram
+    participant AR as Audio Recorder
+    participant TE as Transcription Engine
+    participant WSA as Web Speech API
+    participant FM as File Manager
+    
+    AR->>TE: processAudioStream(audioStream)
+    TE->>TE: initializeSpeechRecognition()
+    TE->>WSA: start recognition
+    WSA-->>TE: onResult(event)
+    TE->>TE: processResult()
+    TE->>FM: saveTranscription(result)
+    FM-->>TE: savedFileInfo
+    TE-->>AR: transcriptionComplete
+```
+
+**Web Speech API の特徴:**
+- ✅ **Chrome標準**: 追加インストール不要
+- ✅ **無料**: APIキーや課金不要
+- ⚠️ **中程度の精度**: 基本的な用途に適用
+- ✅ **リアルタイム処理**: ストリーミング対応
+- ⚠️ **ネットワーク依存**: オンライン接続必須
+
+**実装上の考慮事項:**
+- `SpeechRecognition` APIの利用
+- 言語設定と自動検出
+- 継続的認識のための適切な設定
+- エラーハンドリング（ネットワーク断、タイムアウト等）
+
+### 3. OpenAI Whisper API
 
 ```mermaid
 sequenceDiagram

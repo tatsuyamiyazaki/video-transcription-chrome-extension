@@ -12,14 +12,14 @@ graph TD
     C --> D[Content Script]
     D --> E[Tab Audio Stream]
     E --> F[Audio Capture API]
-    F --> G[Audio Data Buffer]
-    G --> H{文字起こしエンジン選択}
+    F --> G[Audio Data Buffer]    G --> H{文字起こしエンジン選択}
     H -->|Google| I[Google Speech-to-Text API]
-    H -->|OpenAI| J[OpenAI Whisper API]
-    I --> K[Text Response]
-    J --> K
-    K --> L[Text Processing]
-    L --> M[File Generation]
+    H -->|Web Speech| J[Web Speech API]
+    H -->|OpenAI| K[OpenAI Whisper API]    I --> L[Text Response]
+    J --> L
+    K --> L
+    L --> M[Text Processing]
+    M --> N[File Generation]
     M --> N[Google Drive API]
     N --> O[Google Drive Storage]
     
@@ -71,10 +71,18 @@ sequenceDiagram
     Tab-->>Content: オーディオデータ
     Content-->>BG: オーディオデータ送信
     
-    loop リアルタイム処理
-        BG->>API: 音声データ送信
-        API-->>BG: 文字起こし結果
-        BG->>UI: 進捗更新
+    alt Web Speech API使用時
+        loop リアルタイム連続処理
+            BG->>API: 音声ストリーム接続
+            API-->>BG: 中間文字起こし結果
+            BG->>UI: リアルタイム更新
+        end
+    else 外部API使用時
+        loop バッチ処理
+            BG->>API: 音声データ送信
+            API-->>BG: 文字起こし結果
+            BG->>UI: 進捗更新
+        end
     end
     
     User->>UI: 録音停止ボタンクリック
@@ -104,8 +112,15 @@ sequenceDiagram
     User->>Options: 設定変更
     Options->>GDrive: Google Drive認証
     GDrive-->>Options: 認証トークン
-    Options->>STT: APIキー検証
-    STT-->>Options: 検証結果
+    
+    alt 外部API選択時
+        Options->>STT: APIキー検証
+        STT-->>Options: 検証結果
+    else Web Speech API選択時
+        Note over Options: APIキー不要（ブラウザ標準）
+        Options->>Options: ブラウザ対応確認
+    end
+    
     Options->>Storage: 設定保存
     Storage-->>Options: 保存完了
     Options-->>User: 設定保存完了
@@ -146,8 +161,8 @@ SettingsData {
         folderName: string
     },
     transcription: {
-        engine: "google" | "openai",
-        apiKey: string,
+        engine: "google" | "webspeech" | "openai",
+        apiKey?: string, // Web Speech APIでは不要
         language: string,
         quality: "standard" | "enhanced"
     },
@@ -200,6 +215,31 @@ flowchart LR
     E --> F[信頼度チェック]
     F --> G[結果返却]
 ```
+
+#### Web Speech API
+```mermaid
+flowchart LR
+    A[音声ストリーム] --> B[SpeechRecognition初期化]
+    B --> C[ブラウザ内処理]
+    C --> D[リアルタイム結果]
+    D --> E[信頼度チェック]
+    E --> F[中間結果/最終結果判定]
+    F --> G[結果返却]
+```
+
+**Web Speech API の特徴:**
+- ✅ **ブラウザ標準**: Chrome内蔵API、外部接続不要
+- ✅ **リアルタイム処理**: 連続的な音声認識
+- ✅ **無料**: APIキー・課金不要
+- ⚠️ **中程度の精度**: 基本的な用途に適用
+- ⚠️ **ネットワーク依存**: Googleサーバーとの通信が必要
+
+**データフロー詳細:**
+1. 音声ストリームを`SpeechRecognition`オブジェクトに接続
+2. `continuous: true`でリアルタイム連続認識
+3. `onresult`イベントで中間・最終結果を受信
+4. `interim`フラグで中間結果と最終結果を判定
+5. テキスト結果をUIにリアルタイム反映
 
 #### OpenAI Whisper
 ```mermaid
