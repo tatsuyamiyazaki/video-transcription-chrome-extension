@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Video Transcription - Web Speech API POC",
+  "version": "0.1.0",
+  "description": "POC for video audio transcription using Web Speech API",
+  
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "tabCapture",
+    "storage",
+    "downloads"
+  ],
+  
+  "background": {
+    "service_worker": "background.js"
+  },
+  
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Video Transcription",
+    "default_icon": {
+      "16": "src/icon-16.png",
+      "48": "src/icon-48.png",
+      "128": "src/icon-128.png"
+    }
+  },
+  
+  "icons": {
+    "16": "src/icon-16.png",
+    "48": "src/icon-48.png",
+    "128": "src/icon-128.png"
+  }
+}
