@@ -10,7 +10,7 @@
     "tabCapture",
     "storage",
     "downloads",
-    "audioCapture"
+    "offscreen"
   ],
   "host_permissions": [
     "<all_urls>"
