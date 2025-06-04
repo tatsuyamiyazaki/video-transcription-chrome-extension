@@ -3,6 +3,7 @@ class TranscriptionContentScript {
     this.isActive = false;
     this.videoElements = [];
     this.observer = null;
+    this.extensionContextValid = true;
     
     this.init();
   }
@@ -98,7 +99,20 @@ class TranscriptionContentScript {
   }
 
   setupMessageListener() {
+    // Check if extension context is valid before setting up listener
+    if (!this.isExtensionContextValid()) {
+      console.warn('Extension context invalid, skipping message listener setup');
+      return;
+    }
+
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      // Validate context before handling message
+      if (!this.isExtensionContextValid()) {
+        console.warn('Extension context invalid, cannot handle message');
+        sendResponse({ success: false, error: 'Extension context invalidated' });
+        return false;
+      }
+      
       this.handleMessage(message, sender, sendResponse);
       return true; // Keep message channel open
     });
@@ -148,6 +162,12 @@ class TranscriptionContentScript {
   }
 
   notifyVideoStateChange(event, videoIndex) {
+    // Check if extension context is valid before sending message
+    if (!this.isExtensionContextValid()) {
+      console.warn('Extension context invalid, cannot send video state change');
+      return;
+    }
+
     // Send video state change to background script
     chrome.runtime.sendMessage({
       type: 'VIDEO_STATE_CHANGE',
@@ -156,8 +176,15 @@ class TranscriptionContentScript {
       pageInfo: this.getPageInfo(),
       videoInfo: this.getVideoInfo()[videoIndex]
     }).catch(error => {
-      // Background script might not be listening, which is fine
-      console.log('Could not send video state change:', error.message);
+      // Handle context invalidation specifically
+      if (error.message.includes('Extension context invalidated')) {
+        console.warn('Extension context invalidated during message sending');
+        // Mark extension as invalid to prevent future attempts
+        this.extensionContextValid = false;
+      } else {
+        // Background script might not be listening, which is fine
+        console.log('Could not send video state change:', error.message);
+      }
     });
   }
 
@@ -214,6 +241,27 @@ class TranscriptionContentScript {
     }
   }
 
+  isExtensionContextValid() {
+    // If we already know it's invalid, return false
+    if (!this.extensionContextValid) {
+      return false;
+    }
+
+    try {
+      // Try to access chrome.runtime.id - this will throw if context is invalid
+      if (!chrome.runtime || !chrome.runtime.id) {
+        this.extensionContextValid = false;
+        return false;
+      }
+      return true;
+    } catch (error) {
+      // Context is invalid
+      this.extensionContextValid = false;
+      console.warn('Extension context validation failed:', error.message);
+      return false;
+    }
+  }
+
   destroy() {
     // Clean up when content script is destroyed
     if (this.observer) {
@@ -229,9 +277,18 @@ class TranscriptionContentScript {
 let transcriptionContentScript;
 
 try {
-  transcriptionContentScript = new TranscriptionContentScript();
+  // Check if chrome APIs are available before initializing
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) {
+    transcriptionContentScript = new TranscriptionContentScript();
+  } else {
+    console.warn('Chrome extension APIs not available, skipping content script initialization');
+  }
 } catch (error) {
-  console.error('Failed to initialize transcription content script:', error);
+  if (error.message.includes('Extension context invalidated')) {
+    console.warn('Extension context already invalidated during initialization');
+  } else {
+    console.error('Failed to initialize transcription content script:', error);
+  }
 }
 
 // Clean up on beforeunload
