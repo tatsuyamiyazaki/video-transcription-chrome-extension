@@ -17,6 +17,7 @@ class TranscriptionPopup {
     this.languageSelect = document.getElementById('language');
     this.statusDiv = document.getElementById('status');
     this.transcriptionDiv = document.getElementById('transcription');
+    this.permissionGuidanceDiv = document.getElementById('permission-guidance');
   }
 
   attachEventListeners() {
@@ -182,6 +183,7 @@ class TranscriptionPopup {
         this.updateStatus('error', `音声認識エラー: ${message.error}`);
         this.isRecording = false;
         this.updateButtons();
+        this.checkAndShowPermissionError(message.error);
         break;
       case 'BACKGROUND_FORWARD_SPEECH_END':
         this.isRecording = false;
@@ -195,11 +197,15 @@ class TranscriptionPopup {
         this.isRecording = true;
         this.updateButtons();
         this.updateStatus('recording', '音声認識中...');
+        if (this.permissionGuidanceDiv) {
+          this.permissionGuidanceDiv.style.display = 'none';
+        }
         break;
       case 'BACKGROUND_FORWARD_RECOGNITION_INIT_FAILED':
         this.isRecording = false;
         this.updateButtons();
         this.updateStatus('error', `初期化失敗: ${message.error}`);
+        this.checkAndShowPermissionError(message.error);
         break;
       default:
         console.log('Popup: Unknown message type received:', message.type);
@@ -223,6 +229,11 @@ class TranscriptionPopup {
     this.statusDiv.className = `status ${type}`;
     this.statusDiv.textContent = message;
     this.statusDiv.classList.remove('hidden');
+
+    // Always hide permission guidance when a new status comes in, unless it's an error that re-shows it.
+    if (type !== 'error' && this.permissionGuidanceDiv) { // Check if permissionGuidanceDiv exists
+        this.permissionGuidanceDiv.style.display = 'none';
+    }
     
       // Auto-hide success, info, starting, stopping messages after some time
     if (type === 'success' || type === 'starting' || type === 'stopping' || type === 'info') {
@@ -232,6 +243,38 @@ class TranscriptionPopup {
             this.statusDiv.classList.add('hidden');
         }
       }, 3000);
+    }
+  }
+
+  checkAndShowPermissionError(errorMessage) {
+    if (!this.permissionGuidanceDiv) return; // Guard against element not existing
+
+    const errorString = String(errorMessage).toLowerCase();
+    const permissionDeniedKeywords = [
+      'microphone access denied',
+      'permission denied',
+      'permission dismissed',
+      'not-allowed', // common internal error code for permission denial
+      'media access denied'
+    ];
+
+    const isPermissionError = permissionDeniedKeywords.some(keyword => errorString.includes(keyword));
+
+    if (isPermissionError) {
+      this.permissionGuidanceDiv.innerHTML = `
+        <p>マイクへのアクセスが拒否されました。音声認識を使用するには、この拡張機能のマイクアクセスを許可してください。</p>
+        <p><strong>有効にする方法:</strong></p>
+        <ol>
+          <li>ブラウザのツールバーにある拡張機能アイコンを右クリックします。</li>
+          <li>「拡張機能を管理」を選択します。</li>
+          <li>サイトの設定または権限を探し、この拡張機能のマイクアクセスが許可されていることを確認します。</li>
+          <li>ブラウザの一般的なマイク設定も確認できます。</li>
+        </ol>
+        <p>権限を有効にした後、再度文字起こしの開始をお試しください。</p>
+      `;
+      this.permissionGuidanceDiv.style.display = 'block';
+    } else {
+      this.permissionGuidanceDiv.style.display = 'none';
     }
   }
 }
