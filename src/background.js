@@ -42,7 +42,7 @@ class TranscriptionBackground {
     console.log("Creating offscreen document...");
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_DOCUMENT_PATH,
-      reasons: ['USER_MEDIA', 'AUDIO_WORKLET'], // AUDIO_WORKLET might not be strictly needed now but good for future
+      reasons: ['USER_MEDIA'], // AUDIO_WORKLET might not be strictly needed now but good for future
       justification: 'User media (microphone) access for speech recognition and potential audio processing.',
     }).catch(error => {
         console.error("Error creating offscreen document:", error);
