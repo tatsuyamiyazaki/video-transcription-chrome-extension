@@ -207,6 +207,9 @@ class TranscriptionPopup {
         this.updateStatus('error', `初期化失敗: ${message.error}`);
         this.checkAndShowPermissionError(message.error);
         break;
+      case 'BACKGROUND_FORWARD_RECOGNITION_INIT_STATUS':
+        this.updateStatus('starting', message.status);
+        break;
       default:
         console.log('Popup: Unknown message type received:', message.type);
     }
@@ -255,7 +258,11 @@ class TranscriptionPopup {
       'permission denied',
       'permission dismissed',
       'not-allowed', // common internal error code for permission denial
-      'media access denied'
+      'media access denied',
+      'マイクアクセスが拒否',
+      'マイクアクセスエラー',
+      'offscreen設定エラー',
+      'offscreenドキュメントの作成が拒否'
     ];
 
     const isPermissionError = permissionDeniedKeywords.some(keyword => errorString.includes(keyword));

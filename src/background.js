@@ -197,9 +197,21 @@ class TranscriptionBackground {
 
   async handlePopupStartRecognition(message, sender, sendResponse) {
     try {
+      // Check if recognition is already active
+      if (this.isOffscreenRecognitionActive) {
+        console.log("Speech recognition is already active");
+        sendResponse({ success: false, error: "音声認識は既にアクティブです" });
+        return;
+      }
+
       const offscreenDocumentExists = await this.hasOffscreenDocument();
 
       if (!offscreenDocumentExists) {
+        console.log("Creating offscreen document for speech recognition...");
+        this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_INIT_STATUS', { 
+          status: 'Offscreenドキュメントを作成中...' 
+        });
+        
         await this.createOffscreenDocument(); // Attempt to create
         // Add the task to the queue. It will be processed when OFFSCREEN_DOCUMENT_READY is received.
         this.pendingOffscreenTasks.push({
@@ -221,8 +233,19 @@ class TranscriptionBackground {
 
     } catch (error) { // Catch errors primarily from createOffscreenDocument if it throws
       console.error("Failed to setup or ensure offscreen document for recognition:", error);
-      this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_INIT_FAILED', { error: `Offscreen setup error: ${error.message}` });
-      sendResponse({ success: false, error: `Offscreen setup error: ${error.message}` });
+      let userFriendlyError;
+      
+      // Provide more specific error messages
+      if (error.message.includes('Permission denied')) {
+        userFriendlyError = 'Offscreenドキュメントの作成が拒否されました。拡張機能の権限を確認してください。';
+      } else if (error.message.includes('Extension context invalidated')) {
+        userFriendlyError = '拡張機能コンテキストが無効になりました。拡張機能を再読み込みしてください。';
+      } else {
+        userFriendlyError = `Offscreen設定エラー: ${error.message}`;
+      }
+      
+      this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_INIT_FAILED', { error: userFriendlyError });
+      sendResponse({ success: false, error: userFriendlyError });
     }
   }
 

@@ -3,6 +3,9 @@ class SpeechRecognitionManager {
     this.recognition = null;
     this.isActive = false;
     this.language = 'ja-JP'; // Default language
+    this.retryCount = 0;
+    this.maxRetries = 3;
+    this.retryDelay = 1000; // 1 second
     // Callbacks will be handled by messages, so these can be removed or repurposed
     // for internal state if needed, but direct callback props are not used.
   }
@@ -29,6 +32,7 @@ class SpeechRecognitionManager {
     this.recognition.onstart = () => {
       console.log('Offscreen: Speech recognition started');
       this.isActive = true;
+      this.retryCount = 0; // Reset retry count on successful start
       // Optional: Send a message if the background script needs to know about the 'start' event
       // chrome.runtime.sendMessage({ type: 'OFFSCREEN_SPEECH_STARTED' });
     };
@@ -61,16 +65,61 @@ class SpeechRecognitionManager {
 
     this.recognition.onerror = (event) => {
       console.error('Offscreen: Speech recognition error:', event.error);
-      let errorToSend = event.error;
-      if (typeof event.error === 'object' && event.error !== null) {
-        errorToSend = event.error.message || JSON.stringify(event.error);
-      } else if (event.error === undefined && event.type === 'error') {
-        // Handle cases like 'no-speech' which might not have an error object
-        errorToSend = 'Speech recognition error occurred (no specific error object). Common causes: no speech detected, network error, or microphone issue.';
+      let errorMessage;
+      
+      // Enhanced error analysis with user-friendly Japanese messages
+      switch (event.error) {
+        case 'not-allowed':
+          errorMessage = 'マイクアクセスが拒否されました。ブラウザの設定を確認してください。';
+          break;
+        case 'service-not-allowed':
+          errorMessage = 'サービスアクセスが拒否されました。ネットワーク接続を確認してください。';
+          break;
+        case 'no-speech':
+          errorMessage = '音声が検出されませんでした。マイクが正しく設定されているか確認してください。';
+          // Don't send error for no-speech if we want continuous recognition
+          if (this.recognition.continuous) {
+            console.log('No speech detected, but continuing...');
+            return; // Don't send error message
+          }
+          break;
+        case 'network':
+          errorMessage = 'ネットワークエラーが発生しました。インターネット接続を確認してください。';
+          // Attempt automatic retry for network errors
+          if (this.retryCount < this.maxRetries) {
+            this.retryCount++;
+            console.log(`Retrying speech recognition due to network error (attempt ${this.retryCount}/${this.maxRetries})`);
+            setTimeout(() => {
+              this.start({ language: this.language });
+            }, this.retryDelay * this.retryCount);
+            return; // Don't send error message yet
+          } else {
+            errorMessage = `ネットワークエラーが発生しました（${this.maxRetries}回再試行済み）。インターネット接続を確認してください。`;
+            this.retryCount = 0; // Reset for next time
+          }
+          break;
+        case 'audio-capture':
+          errorMessage = 'マイクの音声をキャプチャできませんでした。他のアプリケーションが使用していないか確認してください。';
+          break;
+        case 'bad-grammar':
+          errorMessage = '音声認識の設定にエラーがあります。';
+          break;
+        case 'language-not-supported':
+          errorMessage = '選択された言語はサポートされていません。';
+          break;
+        default:
+          if (typeof event.error === 'object' && event.error !== null) {
+            errorMessage = event.error.message || JSON.stringify(event.error);
+          } else if (event.error === undefined && event.type === 'error') {
+            errorMessage = '音声認識エラーが発生しました。マイク、ネットワーク接続、または音声の検出を確認してください。';
+          } else {
+            errorMessage = `音声認識エラー: ${event.error}`;
+          }
       }
+      
       chrome.runtime.sendMessage({
         type: 'OFFSCREEN_SPEECH_ERROR',
-        error: errorToSend
+        error: errorMessage
       });
     };
 
@@ -144,13 +193,34 @@ class SpeechRecognitionManager {
   }
 }
 
+// Permission checking function
+async function checkMicrophonePermission() {
+  try {
+    const permissionStatus = await navigator.permissions.query({name: 'microphone'});
+    console.log('Microphone permission status:', permissionStatus.state);
+    return permissionStatus.state === 'granted';
+  } catch (error) {
+    console.error('Permission check failed:', error);
+    return false;
+  }
+}
+
 const speechManager = new SpeechRecognitionManager();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Offscreen document received message:', message);
 
   if (message.type === 'INITIALIZE_SPEECH_RECOGNITION') {
-    navigator.mediaDevices.getUserMedia({ audio: true })
+    checkMicrophonePermission()
+      .then((hasPermission) => {
+        if (!hasPermission) {
+          console.log('Offscreen: Requesting microphone permission...');
+          return navigator.mediaDevices.getUserMedia({ audio: true });
+        } else {
+          console.log('Offscreen: Microphone permission already granted');
+          return Promise.resolve();
+        }
+      })
       .then(() => {
         console.log('Offscreen: Microphone access granted');
         try {
@@ -163,7 +233,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((error) => {
         console.error('Offscreen: Microphone access denied:', error);
-        sendResponse({ success: false, error: `Microphone access denied: ${error.message}` });
+        let errorMessage = 'Microphone access denied';
+        
+        // Enhanced error analysis for "not-allowed" cases
+        if (error.name === 'NotAllowedError' || error.message.includes('not-allowed')) {
+          errorMessage = 'マイクアクセスが拒否されました。ブラウザの設定を確認してください。';
+        } else if (error.name === 'NotFoundError') {
+          errorMessage = 'マイクが見つかりません。マイクが接続されていることを確認してください。';
+        } else if (error.name === 'NotReadableError') {
+          errorMessage = 'マイクが使用中または故障しています。他のアプリケーションが使用していないか確認してください。';
+        } else {
+          errorMessage = `マイクアクセスエラー: ${error.message}`;
+        }
+        
+        sendResponse({ success: false, error: errorMessage });
       });
     return true; // Indicates that the response is sent asynchronously
   }
