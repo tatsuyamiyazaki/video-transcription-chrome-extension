@@ -223,3 +223,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 console.log('Offscreen script loaded and message listener added.');
+
+chrome.runtime.sendMessage({ type: 'OFFSCREEN_DOCUMENT_READY', target: 'background' });

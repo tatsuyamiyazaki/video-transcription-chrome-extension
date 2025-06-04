@@ -10,6 +10,7 @@ class TranscriptionBackground {
     this.currentTabId = null; // For tab capture feature
     
     this.isOffscreenRecognitionActive = false; // Tracks state of offscreen speech recognition
+    this.pendingOffscreenTasks = []; // Queue for tasks waiting for offscreen doc to be ready
 
     this.initializeMessageListeners();
   }
@@ -34,24 +35,33 @@ class TranscriptionBackground {
     return existingContexts.length > 0;
   }
 
-  async createOffscreenDocument() {
-    if (await this.hasOffscreenDocument()) {
+  async createOffscreenDocument(path = OFFSCREEN_DOCUMENT_PATH) {
+    // Check if the document already exists.
+    if (await this.hasOffscreenDocument(path)) {
       console.log("Offscreen document already exists.");
-      return;
+      // If it exists, we assume it's ready or will soon send its READY message.
+      // If it had crashed and restarted, it should send READY again.
+      return true; // Indicates it exists or was presumably created successfully before.
     }
-    console.log("Creating offscreen document...");
-    await chrome.offscreen.createDocument({
-      url: OFFSCREEN_DOCUMENT_PATH,
-      reasons: ['USER_MEDIA'], // AUDIO_WORKLET might not be strictly needed now but good for future
-      justification: 'User media (microphone) access for speech recognition and potential audio processing.',
-    }).catch(error => {
-        console.error("Error creating offscreen document:", error);
-        throw error; // Propagate error
-    });
-    console.log("Offscreen document created successfully.");
+
+    console.log("Attempting to create offscreen document...");
+    try {
+      await chrome.offscreen.createDocument({
+        url: path,
+        reasons: ['USER_MEDIA'],
+        justification: 'User media access for speech recognition.',
+      });
+      console.log("Offscreen document creation initiated successfully.");
+      return true; // Creation process started
+    } catch (error) {
+      console.error("Error creating offscreen document:", error);
+      // Propagate the error to be handled by the caller
+      // This allows the caller to inform the popup of the failure.
+      throw error;
+    }
   }
 
-  // Optional: Placeholder for closing the offscreen document
+    // Optional: Placeholder for closing the offscreen document
   async closeOffscreenDocument() {
     if (await this.hasOffscreenDocument()) {
       // This might be too aggressive if recognition could restart soon.
@@ -75,12 +85,81 @@ class TranscriptionBackground {
         this.isOffscreenRecognitionActive = false;
         this.sendMessageToPopup('BACKGROUND_FORWARD_SPEECH_END');
         break;
+      case 'OFFSCREEN_DOCUMENT_READY':
+        console.log("Background: Offscreen document reported READY.");
+        if (sender.url === chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)) {
+          this.processPendingOffscreenTasks();
+        }
+        break;
       default:
         console.warn("Background: Unknown message type from offscreen document:", message.type);
-        // No sendResponse needed usually for offscreen messages unless it's a direct request
     }
   }
 
+  processPendingOffscreenTasks() {
+    console.log(`Processing ${this.pendingOffscreenTasks.length} pending offscreen tasks.`);
+    while (this.pendingOffscreenTasks.length > 0) {
+      const task = this.pendingOffscreenTasks.shift();
+      console.log("Processing task:", task.type, task.originalMessage);
+      // Re-trigger the handling logic for the start request, but this time
+      // the offscreen document is known to be ready.
+      // We call a more direct processing function to avoid re-queueing.
+      this._executeRecognitionTask(task);
+    }
+  }
+
+  // Helper to execute the core logic of initializing and starting recognition
+  // This is called when the offscreen document is confirmed to be ready.
+  _executeRecognitionTask(task) {
+    const { originalMessage, originalSendResponse } = task;
+    const language = originalMessage.language;
+
+    // 1. Initialize speech recognition in offscreen
+    chrome.runtime.sendMessage({
+      target: 'offscreen',
+      type: 'INITIALIZE_SPEECH_RECOGNITION',
+      options: { language: language }
+    }, (initResponse) => {
+      if (chrome.runtime.lastError) {
+        console.error("Error initializing offscreen speech recognition (pending task):", chrome.runtime.lastError.message);
+        this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_INIT_FAILED', { error: chrome.runtime.lastError.message });
+        originalSendResponse({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+
+      if (initResponse && initResponse.success) {
+        // 2. Start speech recognition in offscreen
+        chrome.runtime.sendMessage({
+          target: 'offscreen',
+          type: 'START_SPEECH_RECOGNITION',
+          options: { language: language }
+        }, (startCmdResponse) => {
+          if (chrome.runtime.lastError) {
+            console.error("Error starting offscreen speech recognition command (pending task):", chrome.runtime.lastError.message);
+            this.sendMessageToPopup('BACKGROUND_FORWARD_SPEECH_ERROR', { error: `Failed to send start command: ${chrome.runtime.lastError.message}` });
+            originalSendResponse({ success: false, error: `Failed to send start command: ${chrome.runtime.lastError.message}` });
+            return;
+          }
+
+          if (startCmdResponse && startCmdResponse.success) {
+            this.isOffscreenRecognitionActive = true;
+            this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_STARTED');
+            originalSendResponse({ success: true });
+          } else {
+            const errorMsg = startCmdResponse ? startCmdResponse.error : "Unknown error starting recognition";
+            console.error("Offscreen failed to start recognition (pending task):", errorMsg);
+            this.sendMessageToPopup('BACKGROUND_FORWARD_SPEECH_ERROR', { error: errorMsg });
+            originalSendResponse({ success: false, error: errorMsg });
+          }
+        });
+      } else {
+        const errorMsg = initResponse ? initResponse.error : "Unknown error initializing recognition";
+        console.error("Offscreen failed to initialize speech recognition (pending task):", errorMsg);
+        this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_INIT_FAILED', { error: errorMsg });
+        originalSendResponse({ success: false, error: errorMsg });
+      }
+    });
+  }
 
   async handlePopupOrContentScriptMessage(message, sender, sendResponse) {
     console.log("Background received message from Popup/Content:", message);
@@ -118,55 +197,30 @@ class TranscriptionBackground {
 
   async handlePopupStartRecognition(message, sender, sendResponse) {
     try {
-      await this.createOffscreenDocument(); // Ensure offscreen document is ready
+      const offscreenDocumentExists = await this.hasOffscreenDocument();
 
-      // 1. Initialize speech recognition in offscreen
-      chrome.runtime.sendMessage({
-        target: 'offscreen', // Custom property to identify target, not used by Chrome API itself
-        type: 'INITIALIZE_SPEECH_RECOGNITION',
-        options: { language: message.language }
-      }, async (initResponse) => {
-        if (chrome.runtime.lastError) {
-          console.error("Error initializing offscreen speech recognition:", chrome.runtime.lastError.message);
-          this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_INIT_FAILED', { error: chrome.runtime.lastError.message });
-          sendResponse({ success: false, error: chrome.runtime.lastError.message });
-          return;
-        }
+      if (!offscreenDocumentExists) {
+        await this.createOffscreenDocument(); // Attempt to create
+        // Add the task to the queue. It will be processed when OFFSCREEN_DOCUMENT_READY is received.
+        this.pendingOffscreenTasks.push({
+          type: 'START_RECOGNITION_SEQUENCE', // Internal type for the task
+          originalMessage: message,
+          originalSendResponse: sendResponse,
+        });
+        console.log("Offscreen document creation initiated, task queued.");
+        // sendResponse will be called by _executeRecognitionTask later.
+        return; // Important to return here as the response is now async via the queue
+      }
 
-        if (initResponse && initResponse.success) {
-          // 2. Start speech recognition in offscreen
-          chrome.runtime.sendMessage({
-            target: 'offscreen',
-            type: 'START_SPEECH_RECOGNITION',
-            options: { language: message.language } // Language can be passed again if needed
-          }, (startCmdResponse) => {
-            if (chrome.runtime.lastError) {
-              console.error("Error starting offscreen speech recognition command:", chrome.runtime.lastError.message);
-              this.sendMessageToPopup('BACKGROUND_FORWARD_SPEECH_ERROR', { error: `Failed to send start command: ${chrome.runtime.lastError.message}` });
-              sendResponse({ success: false, error: `Failed to send start command: ${chrome.runtime.lastError.message}` });
-              return;
-            }
-
-            if (startCmdResponse && startCmdResponse.success) {
-              this.isOffscreenRecognitionActive = true;
-              this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_STARTED');
-              sendResponse({ success: true });
-            } else {
-              const errorMsg = startCmdResponse ? startCmdResponse.error : "Unknown error starting recognition";
-              console.error("Offscreen failed to start recognition:", errorMsg);
-              this.sendMessageToPopup('BACKGROUND_FORWARD_SPEECH_ERROR', { error: errorMsg });
-              sendResponse({ success: false, error: errorMsg });
-            }
-          });
-        } else {
-          const errorMsg = initResponse ? initResponse.error : "Unknown error initializing recognition";
-          console.error("Offscreen failed to initialize speech recognition:", errorMsg);
-          this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_INIT_FAILED', { error: errorMsg });
-          sendResponse({ success: false, error: errorMsg });
-        }
+      // If offscreen document already exists, proceed to execute the task directly
+      console.log("Offscreen document exists, proceeding with recognition task directly.");
+      this._executeRecognitionTask({
+        originalMessage: message,
+        originalSendResponse: sendResponse,
       });
-    } catch (error) { // Catch errors from createOffscreenDocument
-      console.error("Failed to setup offscreen document for recognition:", error);
+
+    } catch (error) { // Catch errors primarily from createOffscreenDocument if it throws
+      console.error("Failed to setup or ensure offscreen document for recognition:", error);
       this.sendMessageToPopup('BACKGROUND_FORWARD_RECOGNITION_INIT_FAILED', { error: `Offscreen setup error: ${error.message}` });
       sendResponse({ success: false, error: `Offscreen setup error: ${error.message}` });
     }
